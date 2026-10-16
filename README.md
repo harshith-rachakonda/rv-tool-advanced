@@ -1,4 +1,4 @@
-# OpenRV Review Toolkit
+# RV TOOL ADVANCED
 
 Studio tooling built on top of [OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV)
 (the Academy Software Foundation's open-source media review player) so a VFX/animation team
