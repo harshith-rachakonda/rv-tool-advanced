@@ -1,0 +1,95 @@
+diff --git a/src/lib/app/RvCommon/RvDocument.cpp b/src/lib/app/RvCommon/RvDocument.cpp
+index 773864e..f447c23 100644
+--- a/src/lib/app/RvCommon/RvDocument.cpp
++++ b/src/lib/app/RvCommon/RvDocument.cpp
+@@ -47,6 +47,7 @@
+ #include <stl_ext/string_algo.h>
+ 
+ #include <QtWidgets/QMessageBox>
++#include <QtWidgets/QToolButton>
+ #include <QScreen>
+ 
+ #ifdef PLATFORM_LINUX
+@@ -154,6 +155,82 @@ namespace Rv
+ 
+ #if !defined(PLATFORM_DARWIN)
+         setMenuBar(new QMenuBar(0));
++
++        //
++        // PMF.RV: small camera-icon button docked into the menu bar's
++        // top-right corner (same row as File/Edit/.../Help) for a
++        // one-click "save current frame + annotations" screenshot.
++        // The menu bar itself is constructed once here and lives for
++        // the document's whole lifetime (buildMenu()/mergeMenu() only
++        // rebuild the drop-down QMenu contents, not this QMenuBar
++        // object), so a corner widget added here is stable -- unlike
++        // attaching to it from a Python plugin at runtime, which found
++        // no reliable, already-existing hook to attach to.
++        //
++        // Clicking it fires a Mu/Python-visible generic event rather
++        // than duplicating the save logic here, so the already-working
++        // implementation in pmf_screenshot_mode.py (folder resolution,
++        // filename convention, HUD feedback) stays the single source
++        // of truth.
++        //
++        {
++            QToolButton* screenshotButton = new QToolButton(menuBar());
++            screenshotButton->setObjectName("pmfScreenshotMenuButton");
++            screenshotButton->setAutoRaise(true);
++            screenshotButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
++            screenshotButton->setCursor(Qt::PointingHandCursor);
++            screenshotButton->setToolTip(
++                QString::fromUtf8("PMF.RV \xE2\x80\x94 Save Frame Screenshot\n"
++                                   "Saves the current annotated frame to your Downloads folder\n"
++                                   "as  <VideoName>_frame<N>.png\n\n"
++                                   "Shortcut:  F9"));
++
++            const int iconPx = 14;
++            QPixmap pix(iconPx, iconPx);
++            pix.fill(Qt::transparent);
++            {
++                QPainter p(&pix);
++                p.setRenderHint(QPainter::Antialiasing);
++                const qreal s = iconPx;
++
++                p.setPen(Qt::NoPen);
++                p.setBrush(QColor("#cdd6f4"));
++                p.drawRoundedRect(QRectF(s * 0.05, s * 0.22, s * 0.90, s * 0.65), s * 0.12, s * 0.12);
++                p.drawRoundedRect(QRectF(s * 0.18, s * 0.10, s * 0.25, s * 0.16), s * 0.07, s * 0.07);
++
++                const qreal lensCx = s * 0.52, lensCy = s * 0.565, lensR = s * 0.225;
++                p.setBrush(QColor("#1e1e2e"));
++                p.drawEllipse(QPointF(lensCx, lensCy), lensR, lensR);
++                p.setBrush(QColor("#89b4fa"));
++                p.drawEllipse(QPointF(lensCx, lensCy), lensR * 0.75, lensR * 0.75);
++                p.setBrush(QColor("#1e1e2e"));
++                p.drawEllipse(QPointF(lensCx, lensCy), lensR * 0.45, lensR * 0.45);
++
++                p.setBrush(QColor(255, 255, 255, 200));
++                p.drawEllipse(QPointF(lensCx - lensR * 0.28, lensCy - lensR * 0.28), lensR * 0.18, lensR * 0.18);
++
++                p.setBrush(QColor("#f9e2af"));
++                p.drawEllipse(QPointF(s * 0.80, s * 0.30), s * 0.06, s * 0.06);
++            }
++            screenshotButton->setIcon(QIcon(pix));
++            screenshotButton->setIconSize(QSize(iconPx, iconPx));
++            screenshotButton->setFixedSize(iconPx + 8, iconPx + 8);
++            screenshotButton->setStyleSheet(
++                "QToolButton { background: #2a2a3d; border: 1px solid #45475a; border-radius: 4px; }"
++                "QToolButton:hover { background: #45475a; border-color: #89b4fa; }"
++                "QToolButton:pressed { background: #74c7ec; }");
++
++            connect(screenshotButton, &QToolButton::clicked, this,
++                    [this]()
++                    {
++                        if (RvSession* s = session())
++                        {
++                            s->userGenericEvent("pmf-screenshot-request", "");
++                        }
++                    });
++
++            menuBar()->setCornerWidget(screenshotButton, Qt::TopRightCorner);
++        }
+ #endif
+ 
+         const TwkApp::Application::Documents& docs = TwkApp::App()->documents();

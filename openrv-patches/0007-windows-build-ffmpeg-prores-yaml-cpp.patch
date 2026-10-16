@@ -1,0 +1,131 @@
+diff --git a/cmake/dependencies/ffmpeg.cmake b/cmake/dependencies/ffmpeg.cmake
+index 0ea9a85..df71b59 100644
+--- a/cmake/dependencies/ffmpeg.cmake
++++ b/cmake/dependencies/ffmpeg.cmake
+@@ -210,14 +210,18 @@ ENDIF()
+ 
+ OPTION(RV_FFMPEG_USE_VIDEOTOOLBOX "FFmpeg laveraging the VideoToolbox framework" ${RV_FFMPEG_USE_VIDEOTOOLBOX_DEFAULT_VALUE})
+ 
++# Enable ProRes and other common decoders/encoders by default if not specified
++IF(NOT DEFINED RV_FFMPEG_NON_FREE_DECODERS_TO_ENABLE)
++  SET(RV_FFMPEG_NON_FREE_DECODERS_TO_ENABLE "prores;prores_ks;prores_aw;prores_lgpl;dnxhd;hevc;ac3;mpeg2video" CACHE STRING "FFmpeg decoders to enable")
++ENDIF()
++IF(NOT DEFINED RV_FFMPEG_NON_FREE_ENCODERS_TO_ENABLE)
++  SET(RV_FFMPEG_NON_FREE_ENCODERS_TO_ENABLE "prores;prores_ks;dnxhd" CACHE STRING "FFmpeg encoders to enable")
++ENDIF()
++
+ # Make a list of the Open RV's FFmpeg config options unless already customized. Note that a super project, a project consuming Open RV as a submodule, can
+ # customize the FFmpeg config options via the RV_FFMPEG_CONFIG_OPTIONS cmake property.
+ IF(NOT RV_FFMPEG_CONFIG_OPTIONS)
+   SET(NON_FREE_DECODERS_TO_DISABLE
+-      "aac"
+-      "aac_at"
+-      "aac_fixed"
+-      "aac_latm"
+       "ac3"
+       "bink"
+       "binkaudio_dct"
+@@ -246,8 +250,6 @@ IF(NOT RV_FFMPEG_CONFIG_OPTIONS)
+   ENDFOREACH()
+ 
+   SET(NON_FREE_ENCODERS_TO_DISABLE
+-      "aac"
+-      "aac_mf"
+       "dnxhd"
+       "dvvideo"
+       "prores"
+@@ -327,6 +329,26 @@ IF(RV_CONAN_CMAKE_PREFIX_PATH)
+ ENDIF()
+ RV_BUILD_PKG_CONFIG_PATH(_ffmpeg_pkg_config_path EXTRA_DIRS ${_ffmpeg_extra_pkgconfig_dirs})
+ 
++# Explicit --pkg-config= wrapper (Windows only): FFmpeg's ./configure runs
++# under MSYS sh, and Strawberry Perl's pkg-config script has a
++# "#!/usr/bin/perl" shebang. Under MSYS sh that resolves to Git Bash's own
++# bundled minimal perl at /usr/bin/perl (not Strawberry's), which lacks
++# core modules like Pod::Usage -- so the script dies immediately and
++# configure's own pkg-config auto-detection silently falls back to
++# pkg_config=false, making every library check (dav1d included) fail
++# with "not found using pkg-config" even though the .pc file is correct.
++# This tiny wrapper has a plain "#!/bin/sh" shebang and explicitly invokes
++# Strawberry's perl.exe on the same pkg-config script, sidestepping the
++# shebang resolution entirely.
++IF(RV_TARGET_WINDOWS)
++  SET(_ffmpeg_pkg_config_wrapper
++      "${CMAKE_BINARY_DIR}/pkgconfig_wrapper/pkg-config"
++  )
++  IF(EXISTS "${_ffmpeg_pkg_config_wrapper}")
++    LIST(APPEND RV_FFMPEG_COMMON_CONFIG_OPTIONS "--pkg-config=${_ffmpeg_pkg_config_wrapper}")
++  ENDIF()
++ENDIF()
++
+ # PKG_CONFIG_PATH is explicitly cleared (set to empty) in the configure environment below. pkg-config searches PKG_CONFIG_PATH *before* PKG_CONFIG_LIBDIR; if
+ # the inherited env has MSYS2 MinGW paths (e.g. from Conan's msys2 package), their openssl.pc / zlib.pc shadow the Conan generators .pc files and return
+ # MinGW-targeted flags incompatible with MSVC.
+diff --git a/cmake/dependencies/yaml-cpp.cmake b/cmake/dependencies/yaml-cpp.cmake
+index b1c3dec..332a326 100644
+--- a/cmake/dependencies/yaml-cpp.cmake
++++ b/cmake/dependencies/yaml-cpp.cmake
+@@ -9,7 +9,12 @@
+ # Expose OCIO's own 'yaml_cpp' target replacing the legacy 'src/pub/yaml_cpp' folder.
+ #
+ # ##############################################################################################################################################################
+-ADD_LIBRARY(yaml_cpp STATIC IMPORTED GLOBAL)
++IF(RV_TARGET_WINDOWS)
++  ADD_LIBRARY(yaml_cpp SHARED IMPORTED GLOBAL)
++ELSE()
++  ADD_LIBRARY(yaml_cpp STATIC IMPORTED GLOBAL)
++ENDIF()
++
+ ADD_DEPENDENCIES(yaml_cpp RV_DEPS_OCIO)
+ IF(CMAKE_BUILD_TYPE MATCHES "^Debug$")
+   # Here the postfix is "d" and not "_d": the postfix inside OCIO is: "d".
+@@ -36,10 +41,25 @@ ENDIF()
+ SET(_ocio_yaml_cpp_libpath
+     ${_lib_dir}/${CMAKE_STATIC_LIBRARY_PREFIX}yaml-cpp${_debug_postfix}${CMAKE_STATIC_LIBRARY_SUFFIX}
+ )
+-SET_PROPERTY(
+-  TARGET yaml_cpp
+-  PROPERTY IMPORTED_LOCATION ${_ocio_yaml_cpp_libpath}
+-)
++
++IF(RV_TARGET_WINDOWS)
++  SET(_ocio_yaml_cpp_dllpath
++      ${RV_DEPS_OCIO_DIST_DIR}/bin/yaml-cpp${_debug_postfix}.dll
++  )
++  SET_PROPERTY(
++    TARGET yaml_cpp
++    PROPERTY IMPORTED_LOCATION ${_ocio_yaml_cpp_dllpath}
++  )
++  SET_PROPERTY(
++    TARGET yaml_cpp
++    PROPERTY IMPORTED_IMPLIB ${_ocio_yaml_cpp_libpath}
++  )
++ELSE()
++  SET_PROPERTY(
++    TARGET yaml_cpp
++    PROPERTY IMPORTED_LOCATION ${_ocio_yaml_cpp_libpath}
++  )
++ENDIF()
+ 
+ # It is required to force directory creation at configure time otherwise CMake complains about importing a non-existing path
+ SET(_yaml_cpp_include_dir
+@@ -55,3 +75,6 @@ SET(RV_DEPS_YAML_CPP_VERSION
+     "0.7.0"
+     CACHE INTERNAL "" FORCE
+ )
++
++RV_STAGE_DEPENDENCY_LIBS(TARGET yaml_cpp TARGET_LIBS yaml_cpp DEPENDS RV_DEPS_OCIO)
++
+diff --git a/src/bin/imgtools/rvls/CMakeLists.txt b/src/bin/imgtools/rvls/CMakeLists.txt
+index 18798da..e8de224 100644
+--- a/src/bin/imgtools/rvls/CMakeLists.txt
++++ b/src/bin/imgtools/rvls/CMakeLists.txt
+@@ -13,7 +13,7 @@ SET(_target
+ LIST(APPEND _sources main.cpp utf8Main.cpp)
+ 
+ ADD_EXECUTABLE(
+-  ${_target}
++  ${_target} EXCLUDE_FROM_ALL
+   ${_sources}
+ )
+ 

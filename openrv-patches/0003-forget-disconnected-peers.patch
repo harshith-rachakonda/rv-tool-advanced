@@ -1,0 +1,99 @@
+diff --git a/src/lib/network/TwkQtChat/Client.cpp b/src/lib/network/TwkQtChat/Client.cpp
+index debccf8..ef78362 100644
+--- a/src/lib/network/TwkQtChat/Client.cpp
++++ b/src/lib/network/TwkQtChat/Client.cpp
+@@ -246,6 +246,11 @@ namespace TwkQtChat
+         return 0;
+     }
+ 
++    bool Client::isConnectedTo(const QString& contact) const
++    {
++        return connectionByName(contact) != 0;
++    }
++
+     bool Client::isIncoming(const QString& contact)
+     {
+         DB("Client::isIncoming " << contact.toUtf8().constData());
+@@ -257,10 +262,37 @@ namespace TwkQtChat
+         return false;
+     }
+ 
++    //
++    //  Remove a connection by value. Never key this on peerAddress(): Qt
++    //  returns a Null address once the socket is no longer connected, so
++    //  remove(peerAddress(), c) silently missed for every dropped peer,
++    //  leaving a pointer to an already-deleted Connection in the map.
++    //  connectionByName() dereferences every entry (use-after-free), and the
++    //  stale name made a dropped peer look "already connected" forever, so
++    //  it could never rejoin until RV's networking was restarted.
++    //
++    bool Client::forgetConnection(Connection* c)
++    {
++        bool removed = false;
++        for (ConnectionMap::iterator i = m_connectionMap.begin(); i != m_connectionMap.end();)
++        {
++            if (i.value() == c)
++            {
++                i = m_connectionMap.erase(i);
++                removed = true;
++            }
++            else
++            {
++                ++i;
++            }
++        }
++        return removed;
++    }
++
+     void Client::rejectConnection(Connection* c)
+     {
++        forgetConnection(c);
+         c->abort();
+-        m_connectionMap.remove(c->peerAddress(), c);
+     }
+ 
+     void Client::requestGreeting()
+@@ -329,11 +361,9 @@ namespace TwkQtChat
+     void Client::removeConnection(Connection* connection)
+     {
+         DB("Client::removeConnection dupe " << connection->duplicate());
+-        if (m_connectionMap.contains(connection->peerAddress()))
++        if (forgetConnection(connection))
+         {
+-            DB("    removing connection from map");
+-            m_connectionMap.remove(connection->peerAddress(), connection);
+-
++            DB("    removed connection from map");
+             if (!connection->duplicate() && !connection->remoteContactName().isEmpty())
+             {
+                 emit contactLeft(connection->remoteContactName());
+diff --git a/src/lib/network/TwkQtChat/TwkQtChat/Client.h b/src/lib/network/TwkQtChat/TwkQtChat/Client.h
+index ef08d93..858ac5c 100644
+--- a/src/lib/network/TwkQtChat/TwkQtChat/Client.h
++++ b/src/lib/network/TwkQtChat/TwkQtChat/Client.h
+@@ -110,6 +110,17 @@ namespace TwkQtChat
+         ///
+         bool isIncoming(const QString& contact);
+ 
++        ///
++        /// Return true if there is a live connection currently registered
++        /// for this contact name. Used to distinguish a real duplicate
++        /// connection attempt from a stale reservation left behind by a
++        /// connection that failed before it ever reached readyForUse()
++        /// (e.g. died during greeting validation), since that path never
++        /// gets inserted into m_connectionMap and so never triggers the
++        /// normal contactLeft cleanup.
++        ///
++        bool isConnectedTo(const QString& contact) const;
++
+         ///
+         /// Wait for a message from contact. Returns true if it received
+         /// one and false if it timed out.
+@@ -155,6 +166,7 @@ namespace TwkQtChat
+ 
+     private:
+         void removeConnection(Connection* connection);
++        bool forgetConnection(Connection* connection);
+         Connection* connectionByName(const QString&) const;
+ 
+     private:

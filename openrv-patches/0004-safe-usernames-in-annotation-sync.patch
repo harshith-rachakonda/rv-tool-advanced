@@ -1,0 +1,125 @@
+diff --git a/src/plugins/rv-packages/annotate/annotate_mode.mu b/src/plugins/rv-packages/annotate/annotate_mode.mu
+index ab8ef06..d073bb6 100644
+--- a/src/plugins/rv-packages/annotate/annotate_mode.mu
++++ b/src/plugins/rv-packages/annotate/annotate_mode.mu
+@@ -138,6 +138,7 @@ class: AnnotateMinorMode : MinorMode
+     QToolButton       _smudgeButton;
+     QSlider           _sizeSlider;
+     QSlider           _opacitySlider;
++    QSpinBox          _durationSpinBox;
+     QAction           _undoAct;
+     QAction           _redoAct;
+     QAction           _clearAct;
+@@ -185,8 +186,25 @@ class: AnnotateMinorMode : MinorMode
+ 
+     \: colorToArray (float[]; Color c) { float[] {c.x, c.y, c.z, c.w}; }
+     \: arrayToColor (Color; float[] a) { Color(a[0], a[1], a[2], a[3]); }
+-    method: encodedName (string; string name) { regex.replace("\.", _user, "+"); }
+-    method: decodedName (string; string name) { regex.replace("\+", _user, "."); }
++    //
++    // This encoded name gets embedded both into RV property paths
++    // (where "." is the path separator) AND into Mu source code that
++    // gets eval'd on every other connected machine during Sync Review
++    // (see sync.mu stateInsert()/handleNewProperty(), which %-formats
++    // property values straight into a command string it later evals).
++    // A username containing ANY character outside [A-Za-z0-9_] -- not
++    // just "." -- can silently corrupt that generated code on every
++    // other connected machine: the failure happens on the REMOTE end
++    // and is caught and logged there without surfacing an error to the
++    // local user (by design -- see sync.mu syncState()), so it looks
++    // like strokes from that one user just never sync, with nothing
++    // wrong showing on their own screen. Replacing everything outside
++    // the safe set covers "&" (the specific case that surfaced this),
++    // quotes, spaces, unicode, etc. in one pass rather than adding
++    // characters to a blocklist one bug report at a time.
++    //
++    method: encodedName (string; string name) { regex.replace("[^A-Za-z0-9_]", name, "_"); }
++    method: decodedName (string; string name) { name; }
+ 
+     \: dodgeFunc (Color; Color c)
+     {
+@@ -1507,6 +1525,18 @@ class: AnnotateMinorMode : MinorMode
+         setColor(Color(c.x, c.y, c.z, value / 255.0));
+     }
+ 
++    method: newDurationSlot (void; int value)
++    {
++        //
++        //  How many frames a *newly drawn* stroke stays visible for,
++        //  starting at the frame it's drawn on. Existing strokes already
++        //  on the canvas are unaffected -- this only applies going
++        //  forward. The rendering side (PaintIPNode) already fully
++        //  supports startFrame/duration; this control just exposes it.
++        //
++        _currentDrawMode.duration = value;
++    }
++
+     method: newColorSlot (void; QColor color, bool lock, bool alpha)
+     {
+         _colorDialogLock = lock;
+@@ -2510,6 +2540,7 @@ class: AnnotateMinorMode : MinorMode
+         }
+ 
+         setBrushSize(_currentDrawMode.size);
++        if (_durationSpinBox neq nil) _durationSpinBox.setValue(_currentDrawMode.duration);
+         _currentDrawMode.button.setChecked(true);
+         drawModeTable(_currentDrawMode.eventTable);
+     }
+@@ -2773,6 +2804,7 @@ class: AnnotateMinorMode : MinorMode
+             _clearButton       = _drawPane.findChild("clearButton");
+             _opacitySlider     = _drawPane.findChild("opacitySlider");
+             _toolSliderLabel   = _drawPane.findChild("toolSliderLabel");
++            _durationSpinBox   = _drawPane.findChild("durationSpinBox");
+         }
+         catch (exception exc)
+         {
+@@ -3112,6 +3144,7 @@ class: AnnotateMinorMode : MinorMode
+         connect(_colorTriangle, QtColorTriangle.colorChanged, newColorSlot(,false,false));
+         connect(_opacitySlider, QAbstractSlider.valueChanged, newOpacitySlot);
+         connect(_sizeSlider, QAbstractSlider.valueChanged, newSizeSlot);
++        connect(_durationSpinBox, QSpinBox.valueChanged, newDurationSlot);
+         connect(_drawDock, QDockWidget.dockLocationChanged, locationChangedSlot);
+         connect(_drawDock, QDockWidget.topLevelChanged, topLevelChangedSlot);
+ 
+diff --git a/src/plugins/rv-packages/annotate/drawpane.ui b/src/plugins/rv-packages/annotate/drawpane.ui
+index 226de01..2267a9a 100644
+--- a/src/plugins/rv-packages/annotate/drawpane.ui
++++ b/src/plugins/rv-packages/annotate/drawpane.ui
+@@ -474,6 +474,37 @@
+         </property>
+        </widget>
+       </item>
++      <item>
++       <widget class="QLabel" name="label_duration">
++        <property name="font">
++         <font>
++          <pointsize>10</pointsize>
++         </font>
++        </property>
++        <property name="toolTip">
++         <string>Number of frames this annotation stays visible for, starting at the frame it's drawn on</string>
++        </property>
++        <property name="text">
++         <string>Duration (frames)</string>
++        </property>
++       </widget>
++      </item>
++      <item>
++       <widget class="QSpinBox" name="durationSpinBox">
++        <property name="toolTip">
++         <string>Number of frames this annotation stays visible for, starting at the frame it's drawn on</string>
++        </property>
++        <property name="minimum">
++         <number>1</number>
++        </property>
++        <property name="maximum">
++         <number>99999</number>
++        </property>
++        <property name="value">
++         <number>1</number>
++        </property>
++       </widget>
++      </item>
+      </layout>
+     </widget>
+    </item>

@@ -1,0 +1,71 @@
+================================================================================
+  PMF.RV -- Reviewing from outside the studio
+  (director on set, crew working remotely)
+================================================================================
+
+You can join the studio's review sessions from anywhere with internet --
+see the same frames, scrub together, and draw on the picture with everyone.
+
+
+WHAT YOU NEED (ONE TIME)
+------------------------
+1. Tailscale -- a small app that securely connects your computer to the
+   studio's review server.
+     - Install it from  https://tailscale.com/download
+     - Sign in with the account the studio invited (check your email for the
+       invitation).
+     - Leave it running. Its icon sits near the clock.
+
+2. PMF.RV -- the studio sends you a zip of the PMF.RVTOOL folder.
+     - Extract it anywhere (e.g. C:\Tools\PMF.RVTOOL) and open RVTool.exe.
+     - First launch asks for your name and employee ID -- this is how others
+       see you in sessions.
+     - If Windows asks to allow access through the firewall, click Allow /
+       Yes.
+     - So it can update itself over Tailscale, save the update login once:
+       press Windows + R, type  \\100.64.0.10\PMF.RVTOOL_release  and press
+       Enter, sign in with the user name and password the studio gives you,
+       and tick "Remember my credentials". After that PMF.RV keeps itself up
+       to date whenever Tailscale is connected.
+
+
+BEFORE EACH REVIEW: GET THE FILES
+---------------------------------
+Review sessions don't send the video itself -- everyone plays it from their
+own copy. The studio sends you the files to review (download link or shared
+folder).
+
+  Put them in your Review Media folder:
+    Advanced -> Review Media Folder... -> Open Folder
+  (normally Documents\PMF.RV Review Media). Sub-folders are fine.
+
+When the session opens a file, PMF.RV finds your copy there by itself and
+shows "Using your local copy of ...". If it says "Can't find ...", that file
+isn't in your folder yet -- copy it in; it is picked up straight away.
+
+
+JOINING A SESSION
+-----------------
+  Easiest: someone at the studio uses "Notify a Friend" on you. A
+  notification appears even if PMF.RV is closed -- click it and you're in
+  their session.
+
+  Or: they send you a room code (like "amber-otter-4821"), and you use
+      Advanced -> Join Room...  and type it in.
+
+  Advanced -> Who's in the Room... shows everyone in the session.
+  Advanced -> Leave Room            when you're done.
+
+
+IF SOMETHING DOESN'T WORK
+-------------------------
+  "Could not join room"      -- is Tailscale connected (icon near the clock)?
+                                Is the room still open at the studio?
+  "Can't find <file>"        -- copy that file into your Review Media folder.
+  Picture stutters           -- ask the studio for a smaller review copy
+                                (H.264) of that file.
+  Nobody can notify you      -- PMF.RV Notify (tray icon) must be running;
+                                opening PMF.RV once starts it.
+
+  Contact: support@example.com
+================================================================================

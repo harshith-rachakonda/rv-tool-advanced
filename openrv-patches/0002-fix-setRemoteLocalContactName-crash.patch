@@ -1,0 +1,17 @@
+diff --git a/src/lib/app/RvCommon/MuUICommands.cpp b/src/lib/app/RvCommon/MuUICommands.cpp
+index 6540b3b..de7d548 100644
+--- a/src/lib/app/RvCommon/MuUICommands.cpp
++++ b/src/lib/app/RvCommon/MuUICommands.cpp
+@@ -232,7 +232,11 @@ namespace Rv
+ 
+             new Function(c, "remoteLocalContactName", remoteLocalContactName, None, Return, "string", End),
+ 
+-            new Function(c, "setRemoteLocalContactName", setRemoteLocalContactName, None, Return, "string", Parameters,
++            // Return type must match NODE_IMPLEMENTATION(..., void) below. It was
++            // declared "string", so callers (the Python wrapper in particular)
++            // converted garbage from the return register into a string and
++            // crashed RV with an access violation on every call.
++            new Function(c, "setRemoteLocalContactName", setRemoteLocalContactName, None, Return, "void", Parameters,
+                          new Param(c, "name", "string"), End),
+ 
+             new Function(c, "remoteConnect", remoteConnect, None, Return, "void", Parameters, new Param(c, "name", "string"),

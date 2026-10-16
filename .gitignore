@@ -1,0 +1,8 @@
+build/
+tests/upd/
+__pycache__/
+*.pyc
+*.old
+*.new
+*.pmfpart
+release_manifest.txt

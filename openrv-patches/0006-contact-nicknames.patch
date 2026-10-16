@@ -1,0 +1,241 @@
+diff --git a/src/lib/app/RvCommon/RvCommon/RvNetworkDialog.h b/src/lib/app/RvCommon/RvCommon/RvNetworkDialog.h
+index 4533bed..fb48d23 100644
+--- a/src/lib/app/RvCommon/RvCommon/RvNetworkDialog.h
++++ b/src/lib/app/RvCommon/RvCommon/RvNetworkDialog.h
+@@ -14,6 +14,7 @@
+ #include <map>
+ #include <QtWidgets/QDialog>
+ #include <QtGui/QStandardItemModel>
++#include <QtCore/QMap>
+ 
+ #include <IPCore/Session.h>
+ 
+@@ -79,6 +80,7 @@ namespace Rv
+         void popupConnect(bool);
+         void popupDelete(bool);
+         void popupDisconnect(bool);
++        void popupRename(bool);
+         void popup(const QPoint&);
+         void doubleClickContact(const QModelIndex&);
+         void resetConfig();
+@@ -120,6 +122,14 @@ namespace Rv
+         QMenu* m_contactPopup;
+         SessionMap m_sessionMap;
+         QString m_portFile;
++
++        // User-editable per-contact display names ("nicknames"), keyed by
++        // "name@machine" -- purely cosmetic. All identity/permission
++        // matching continues to use the real name/machine columns
++        // untouched; this map only ever feeds the separate Nickname
++        // column so renaming a contact can never affect connection or
++        // permission matching.
++        QMap<QString, QString> m_contactAliases;
+     };
+ 
+ } // namespace Rv
+diff --git a/src/lib/app/RvCommon/RvNetworkDialog.cpp b/src/lib/app/RvCommon/RvNetworkDialog.cpp
+index bc882e0..bb8abff 100644
+--- a/src/lib/app/RvCommon/RvNetworkDialog.cpp
++++ b/src/lib/app/RvCommon/RvNetworkDialog.cpp
+@@ -14,6 +14,7 @@
+ #include <QRegularExpression>
+ #include <QtNetwork/QtNetwork>
+ #include <QtWidgets/QMessageBox>
++#include <QtWidgets/QInputDialog>
+ #include <TwkQtChat/Client.h>
+ #include <TwkQtChat/Connection.h>
+ #include <IPCore/Session.h>
+@@ -72,6 +73,7 @@ namespace Rv
+         QAction* msep = m_contactPopup->addSeparator();
+         QAction* mconnect = m_contactPopup->addAction("Connect...");
+         QAction* mdisconnect = m_contactPopup->addAction("Disconnect...");
++        QAction* mrename = m_contactPopup->addAction("Rename...");
+         QAction* mdelete = m_contactPopup->addAction("Delete");
+ 
+         m_ui.statusLabel->setText("<b>Not Running</b>");
+@@ -83,6 +85,7 @@ namespace Rv
+         connect(m_ui.connectButton, SIGNAL(clicked()), this, SLOT(startConnect()));
+         connect(mconnect, SIGNAL(triggered(bool)), this, SLOT(popupConnect(bool)));
+         connect(mdisconnect, SIGNAL(triggered(bool)), this, SLOT(popupDisconnect(bool)));
++        connect(mrename, SIGNAL(triggered(bool)), this, SLOT(popupRename(bool)));
+         connect(mdelete, SIGNAL(triggered(bool)), this, SLOT(popupDelete(bool)));
+         connect(m_ui.resetConfigButton, SIGNAL(clicked()), this, SLOT(resetConfig()));
+ 
+@@ -176,6 +179,16 @@ namespace Rv
+ 
+         ContactMap contacts = settings.value("contacts").toMap();
+ 
++        // Load per-contact nicknames BEFORE populating rows below, so
++        // addContact() can fill in the Nickname column immediately
++        // instead of leaving it blank until the next reload.
++        QVariantMap aliasVariants = settings.value("contactAliases").toMap();
++        m_contactAliases.clear();
++        for (QVariantMap::const_iterator it = aliasVariants.constBegin(); it != aliasVariants.constEnd(); ++it)
++        {
++            m_contactAliases[it.key()] = it.value().toString();
++        }
++
+         QList<QString> keys = contacts.keys();
+         m_contactsModel->clear();
+         QStringList headers;
+@@ -185,6 +198,7 @@ namespace Rv
+         headers.push_back("Permission");
+         headers.push_back("App    ");
+         headers.push_back("Session");
++        headers.push_back("Nickname");
+         m_contactsModel->setHorizontalHeaderLabels(headers);
+ 
+         for (int i = 0; i < keys.size(); i++)
+@@ -194,7 +208,7 @@ namespace Rv
+             addContact(parts[0], parts[1], 0, p, "", false);
+         }
+ 
+-        for (int i = 0; i < 4; i++)
++        for (int i = 0; i < 7; i++)
+             m_ui.contactTreeView->resizeColumnToContents(i);
+ 
+         settings.endGroup();
+@@ -268,6 +282,11 @@ namespace Rv
+         DB("RvNetworkDialog::addContact cname " << cname.toUtf8().data() << " chost " << chost.toUtf8().data() << " connection "
+                                                 << connection << " capp " << capp.toUtf8().data() << " session " << csess.toUtf8().data());
+ 
++        // Cosmetic only -- see m_contactAliases declaration. Never used
++        // for identity/permission matching, which continues to key off
++        // the real cname/chost exactly as before this was added.
++        QString aliasKey = cname + "@" + chost;
++
+         if (checkForExisting)
+         {
+             int i = findContact(cname, chost);
+@@ -279,6 +298,7 @@ namespace Rv
+                 m_contactsModel->item(i, 0)->setCheckState(connection ? Qt::Checked : Qt::Unchecked);
+                 m_contactsModel->item(i, 4)->setText(capp);
+                 m_contactsModel->item(i, 5)->setText(csess);
++                m_contactsModel->item(i, 6)->setText(m_contactAliases.value(aliasKey));
+ 
+                 return;
+             }
+@@ -290,6 +310,7 @@ namespace Rv
+         QStandardItem* perm = new QStandardItem();
+         QStandardItem* appl = new QStandardItem(capp);
+         QStandardItem* sess = new QStandardItem(csess);
++        QStandardItem* nick = new QStandardItem(m_contactAliases.value(aliasKey));
+ 
+         conn->setCheckState(connection ? Qt::Checked : Qt::Unchecked);
+         conn->setEditable(false);
+@@ -299,6 +320,10 @@ namespace Rv
+         perm->setText(permText);
+         appl->setEditable(false);
+         sess->setEditable(false);
++        // Editing goes through the "Rename..." context-menu action (and
++        // its persistence into m_contactAliases / saveSettings) rather
++        // than allowing in-place edits directly on the model.
++        nick->setEditable(false);
+ 
+         QList<QStandardItem*> row;
+         row.push_back(conn);
+@@ -307,6 +332,7 @@ namespace Rv
+         row.push_back(perm);
+         row.push_back(appl);
+         row.push_back(sess);
++        row.push_back(nick);
+ 
+         m_contactsModel->appendRow(row);
+ 
+@@ -356,6 +382,14 @@ namespace Rv
+ 
+         settings.setValue("contacts", contacts);
+         settings.setValue("defaultPermission", m_ui.permissionCombo->currentIndex());
++
++        QVariantMap aliasVariants;
++        for (QMap<QString, QString>::const_iterator it = m_contactAliases.constBegin(); it != m_contactAliases.constEnd(); ++it)
++        {
++            aliasVariants[it.key()] = it.value();
++        }
++        settings.setValue("contactAliases", aliasVariants);
++
+         settings.endGroup();
+     }
+ 
+@@ -630,10 +664,28 @@ namespace Rv
+         string sender = name.toUtf8().constData();
+         if (m_sessionMap[sender].size())
+         {
+-            cerr << "ERROR: RvNetwork: '" << sender << "' is already connected." << endl;
+-            c->setDuplicate(true);
+-            m_client->rejectConnection(c);
+-            return;
++            if (m_client->isConnectedTo(name))
++            {
++                cerr << "ERROR: RvNetwork: '" << sender << "' is already connected." << endl;
++                c->setDuplicate(true);
++                m_client->rejectConnection(c);
++                return;
++            }
++
++            //
++            //  m_sessionMap has a reservation for this contact, but no live
++            //  connection actually backs it. This happens when a prior
++            //  connection attempt from this contact failed validation
++            //  between requestGreeting() (which reserves the sessionMap
++            //  slot) and readyForUse() (which is where it would have been
++            //  registered with the Client, and where a later disconnect
++            //  would normally trigger cleanup via contactLeft). Since that
++            //  registration never happened, the normal cleanup path never
++            //  fires and the reservation leaks. Treat it as stale and let
++            //  this new connection through instead of rejecting it.
++            //
++            cerr << "INFO: RvNetwork: clearing stale session reservation for '" << sender << "' (no live connection found)" << endl;
++            m_sessionMap.erase(sender);
+         }
+         m_sessionMap[sender] = session->name();
+         DB("    new sessionMap val '" << m_sessionMap[sender] << "'");
+@@ -989,6 +1041,48 @@ namespace Rv
+         }
+     }
+ 
++    void RvNetworkDialog::popupRename(bool)
++    {
++        //
++        //  Let the user set a custom display name ("nickname") for the
++        //  selected contact, purely cosmetic -- see m_contactAliases.
++        //  Connection/permission matching is untouched; it still keys
++        //  off the real Name/Machine columns exactly as before.
++        //
++
++        set<int> rows = selectedContacts();
++
++        if (rows.empty())
++            return;
++
++        int row = *rows.begin();
++
++        QStandardItem* name = m_contactsModel->item(row, 1);
++        QStandardItem* host = m_contactsModel->item(row, 2);
++        QStandardItem* nick = m_contactsModel->item(row, 6);
++
++        QString aliasKey = name->text() + "@" + host->text();
++        QString current = nick->text();
++
++        bool ok = false;
++        QString newNick = QInputDialog::getText(
++            this, "Rename Contact",
++            QString("Display name for %1:\n(leave blank to show the system name again)").arg(aliasKey), QLineEdit::Normal, current, &ok);
++
++        if (!ok)
++            return;
++
++        newNick = newNick.trimmed();
++        nick->setText(newNick);
++
++        if (newNick.isEmpty())
++            m_contactAliases.remove(aliasKey);
++        else
++            m_contactAliases[aliasKey] = newNick;
++
++        saveSettings();
++    }
++
+     void RvNetworkDialog::popupDelete(bool)
+     {
+         //

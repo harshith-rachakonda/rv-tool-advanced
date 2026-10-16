@@ -1,0 +1,65 @@
+PMF.RVTOOL -- developer notes (dev folder only; Source\ and Server\ are never published)
+
+FOLDERS
+  <dev root>          exactly what colleagues get (minus logs and publish_release.ps1)
+  Source\             C# sources, SetupFirewall manifest, build.ps1
+  Server\             PMFRoomServer.exe -- for the room-server machine only
+  C:\PMF.RVTOOL_release   master copy everyone updates from (shared as
+                          \\192.0.2.10\PMF.RVTOOL_release). Never run PMF.RV from it.
+
+CHANGE -> RELEASE
+  1. Edit (plugins: app\PlugIns\Python\pmf_*.py; launcher etc.: Source\*.cs)
+  2. Source\build.ps1                (only if a .cs changed)
+  3. Bump "Internal Version" in VERSION.txt (10.05 -> 10.06 ...; plain numbers since 10.05),
+     add a changelog entry, update README.txt's header
+  4. .\publish_release.ps1 -DryRun   then  .\publish_release.ps1
+     (refuses same-version / unbuilt publishes, syntax-checks plugins,
+     refreshes the .rvpkg files, writes release_manifest.txt via
+     Source\write_manifest.ps1, copies VERSION.txt last)
+
+  New plugin: .py in app\PlugIns\Python, an .rvpkg (PACKAGE + .py) in
+  app\PlugIns\Packages, and a line in app\PlugIns\Mu\rvload2.
+
+SERVER ADDRESSES
+  app\etc\pmf_studio.ini -- [update] sources, [room] servers. Moving a server:
+  add the new address FIRST, publish, let people launch once, then move.
+
+ROOM SERVER
+  Server\PMFRoomServer.exe --install    copies to %ProgramData%\PMF.RV\RoomServer,
+                                        adds firewall rule "PMF.RV Room Server"
+                                        (TCP 45150, private ranges + Tailscale),
+                                        starts it, auto-starts at login
+  Server\PMFRoomServer.exe --uninstall  reverses all of that
+  Log: %ProgramData%\PMF.RV\RoomServer\room_server_log.txt
+  After rebuilding it, run --install again to update the live copy.
+
+THIS MACHINE
+  Desktop\PMF.RVTOOL_disable_autoupdate.txt keeps the dev folder from ever
+  updating itself from the release copy. Don't delete it.
+
+RVTOOL.EXE TEST HOOKS (environment variables)
+  PMF_RVTOOL_TEST=1                   run every pre-launch step, don't start rv.exe,
+                                      no message boxes, no SetupFirewall launch
+  PMF_RVTOOL_TEST_SELF=<folder>       act as if installed in <folder>
+  PMF_RVTOOL_TEST_SETTINGS_INI=<file> migration target instead of %APPDATA%\ASWF\OpenRV.ini
+  PMF_RVTOOL_TEST_UI=1                show the 'Updating PMF.RV' window even in test mode
+  Exit codes: 0 ok, 1 rv.exe missing, 2 refused (master release copy),
+              3 another launch is already updating this install.
+
+OUTSIDE REVIEWERS (TAILSCALE)
+  Rooms/invites already work over Tailscale: the relay listens on all
+  addresses and its firewall rule allows 100.64.0.0/10; pmf_studio.ini lists
+  the 100.64.0.10 addresses. Two admin steps for each new outsider:
+  1. Tailscale admin console -> Users -> Invite (their email).
+  2. Access controls: let outsiders reach ONLY the review server, e.g.
+       "groups": { "group:pmf-remote": ["director@example.com"] },
+       "acls": [
+         { "action": "accept", "src": ["autogroup:member"], "dst": ["*:*"] },   <- replace with your staff rule
+         { "action": "accept", "src": ["group:pmf-remote"], "dst": ["100.64.0.10:45150,445"] }
+       ]
+     (45150 = room server, 445 = update share). Remove the outsider from the
+     staff rule so they can't reach anything else. Check the console's
+     preview before saving.
+  Updates over Tailscale: firewall rule "PMF.RV Release Share (office +
+  Tailscale)" (TCP 445 from 172.16.0.0/12 and 100.64.0.0/10) is on this PC;
+  outsiders save the reviewshare login once for \\100.64.0.10\PMF.RVTOOL_release. Media: outsiders use their Review Media folder.

@@ -1,0 +1,165 @@
+diff --git a/src/plugins/rv-packages/sync/sync.mu b/src/plugins/rv-packages/sync/sync.mu
+index 122c845..16deafd 100644
+--- a/src/plugins/rv-packages/sync/sync.mu
++++ b/src/plugins/rv-packages/sync/sync.mu
+@@ -277,6 +277,52 @@ class: RemoteSync : MinorMode
+     DelayedEvent[] _delayedEvents;
+     float          _pointerTrailTime;
+     SyncContact[]  _virtualContacts;
++    string[]       _recentGraphPayloads;
++    string[]       _recentGraphSenders;
++    float[]        _recentGraphTimes;
++
++    //
++    //  Loop guard for relayed graph-state events (annotations etc).
++    //  syncState re-sends every received graph event to the other
++    //  contacts. That is correct in a star (one host relaying for
++    //  everyone) but if the contact graph has a cycle -- e.g. two
++    //  participants in a room also connect to each other directly --
++    //  the same payload comes back around through a different neighbor
++    //  and insert*Property calls would duplicate strokes forever.
++    //  A loop copy always arrives via a DIFFERENT sender within
++    //  milliseconds, while a legitimate repeat comes from the same
++    //  sender, so drop identical payloads seen from another sender in
++    //  the last 2 seconds.
++    //
++    method: graphLoopDuplicate (bool; string payload, string sender)
++    {
++        let now = theTime();
++        bool dup = false;
++
++        for_index (i; _recentGraphPayloads)
++        {
++            if (!dup &&
++                now - _recentGraphTimes[i] < 2.0 &&
++                _recentGraphSenders[i] != sender &&
++                _recentGraphPayloads[i] == payload)
++            {
++                dup = true;
++            }
++        }
++
++        if (_recentGraphPayloads.size() >= 64)
++        {
++            _recentGraphPayloads.erase(0, 1);
++            _recentGraphSenders.erase(0, 1);
++            _recentGraphTimes.erase(0, 1);
++        }
++
++        _recentGraphPayloads.push_back(payload);
++        _recentGraphSenders.push_back(sender);
++        _recentGraphTimes.push_back(now);
++
++        return dup;
++    }
+ 
+     method: receiveLockPush(void;)
+     {
+@@ -1770,26 +1816,60 @@ class: RemoteSync : MinorMode
+ 
+     method: syncState (void; Event event)
+     {
+-        deb ("syncState cont '%s'" % event.contents()); 
++        deb ("syncState cont '%s'" % event.contents());
++
++        if (graphLoopDuplicate(event.contents().split("|")[0], event.sender()))
++        {
++            deb ("    syncState dropping loop duplicate from %s" % event.sender());
++            return;
++        }
++
+         let (contentsArray, c) = parseCompoundEventContents(event);
+ 
+         for_each (contents; contentsArray)
+         {
+-            let parts         = contents.split("/"),
+-                propName      = parts[0],
+-                propParts     = propName.split("."),
+-                node          = propParts[0],
+-                pgroup        = pipelineGroupTypeOfNode(node),
+-                altPropName   = parts[1];
++            string propName;
++            string altPropName;
++            string node;
++            string pgroup;
++            string cmd;
++            bool parseOk = true;
+ 
+-            string[] cmdParts = string[]();
+-            for (int i = 2; i < parts.size(); i++)
++            try
+             {
+-                cmdParts.push_back(parts[i]);
++                let parts         = contents.split("/"),
++                    propNameT     = parts[0],
++                    propParts     = propNameT.split("."),
++                    nodeT         = propParts[0],
++                    pgroupT       = pipelineGroupTypeOfNode(nodeT),
++                    altPropNameT  = parts[1];
++
++                string[] cmdParts = string[]();
++                for (int i = 2; i < parts.size(); i++)
++                {
++                    cmdParts.push_back(parts[i]);
++                }
++
++                propName    = propNameT;
++                node        = nodeT;
++                pgroup      = pgroupT;
++                altPropName = altPropNameT;
++                cmd         = string.join(cmdParts, "/");
++            }
++            catch (...)
++            {
++                //
++                //  Malformed sync event contents -- e.g. a contact or
++                //  property name containing a character (such as "/")
++                //  that breaks the assumed "prop/altprop/cmd" format --
++                //  should not crash the whole sync channel. Skip this
++                //  entry instead of throwing all the way up to the
++                //  generic Mu event-exception handler.
++                //
++                parseOk = false;
+             }
+-            string cmd = string.join(cmdParts, "/");
+ 
+-            if (viewNode() != "")
++            if (parseOk && viewNode() != "")
+             {
+                 for_each (r; _blockPropList)
+                 {
+@@ -1821,9 +1901,21 @@ class: RemoteSync : MinorMode
+                 }
+             }
+         }
+-        deb ("    syncState cont '%s' done" % event.contents()); 
+-        let contentsParts = event.contents().split("|");
+-        sendEach("remote-sync-graph-state", contentsParts[0], event.sender() /*originator*/, false /*force*/, 2 /*minVersion*/);
++        deb ("    syncState cont '%s' done" % event.contents());
++
++        //
++        //  Relay to the other contacts (star topology: the room host
++        //  forwards each participant's annotations to everyone else).
++        //  Gated on _broadcastExternalEvents like every other relayed
++        //  event type (frame, play, pointer, eval) -- in full-mesh mode
++        //  (SyncWithContactsContacts) that flag is off, and relaying here
++        //  as well would re-insert each stroke once per extra path.
++        //
++        if (_broadcastExternalEvents)
++        {
++            let contentsParts = event.contents().split("|");
++            sendEach("remote-sync-graph-state", contentsParts[0], event.sender() /*originator*/, false /*force*/, 2 /*minVersion*/);
++        }
+     }
+ 
+     method: sessionAsByteArray (byte[]; )
+@@ -2425,6 +2517,9 @@ class: RemoteSync : MinorMode
+         _hasOlderContactVersions = false;
+         _delayedEvents           = DelayedEvent[]();
+         _accumulate              = 0;
++        _recentGraphPayloads     = string[]();
++        _recentGraphSenders      = string[]();
++        _recentGraphTimes        = float[]();
+ 
+         _firstConnect = nil;
+         if (commandLineFlag("syncPullFirst") neq nil) _firstConnect = "pull";
